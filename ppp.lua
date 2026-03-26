@@ -1,30 +1,22 @@
--- SWILL // MM2 AUTO FARMER V11 // MANUAL DETECTION MODE
--- Позволяет пользователю указать элемент, по которому определять активность игры.
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
--- Глобальные переменные
 local isRunning = false
 local isEvading = false
 local isGameActive = false
 local currentNoclip = nil
 local currentConnection = nil
-local detectionTarget = nil   -- Объект, наличие которого говорит об активной игре
+local detectionTarget = nil
 local debugMode = true
 
--- ========== ДЕТЕКЦИЯ АКТИВНОСТИ (по выбранному элементу или авто) ==========
 local function isGameActuallyActive()
-    -- Если пользователь выбрал элемент, проверяем его наличие и видимость
     if detectionTarget and detectionTarget.Parent and detectionTarget:IsDescendantOf(game) then
-        -- Проверяем, что объект всё ещё существует и видим (если это GuiObject)
         local visible = true
         if detectionTarget:IsA("GuiObject") then
             visible = detectionTarget.Visible
-            -- также проверяем видимость всех родителей
             local parent = detectionTarget.Parent
             while parent and parent:IsA("GuiObject") do
                 if not parent.Visible then visible = false end
@@ -38,11 +30,9 @@ local function isGameActuallyActive()
         end
     end
     
-    -- Если элемент не выбран или исчез, пробуем автоопределение (V10)
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return false end
     
-    -- 1. Таймер
     local hasTimer = false
     for _, obj in pairs(playerGui:GetDescendants()) do
         if obj:IsA("TextLabel") and obj.Visible and string.match(obj.Text or "", "%d+:%d+") then
@@ -59,7 +49,6 @@ local function isGameActuallyActive()
         end
     end
     
-    -- 2. Кнопка Reset
     local hasReset = false
     for _, obj in pairs(playerGui:GetDescendants()) do
         if obj:IsA("TextButton") and obj.Visible and obj.Text == "Reset" then
@@ -68,7 +57,6 @@ local function isGameActuallyActive()
         end
     end
     
-    -- 3. Роль
     local hasRole = false
     for _, obj in pairs(playerGui:GetDescendants()) do
         if obj:IsA("TextLabel") and obj.Visible then
@@ -100,11 +88,10 @@ local function isGameActuallyActive()
     return active
 end
 
--- ========== ФУНКЦИЯ ВЫБОРА ЭЛЕМЕНТА ==========
 local function startElementSelection()
     local oldMouseIcon = LocalPlayer:GetMouse().Icon
     LocalPlayer:GetMouse().Icon = "rbxasset://SystemCursor/Crosshair"
-    print("[SWILL] Режим выбора элемента. Наведите курсор на элемент (таймер, панель здоровья и т.п.) и нажмите любую клавишу.")
+    print("[SWILL] Режим выбора элемента. Наведите курсор на элемент и нажмите любую клавишу.")
     
     local connection
     connection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -112,12 +99,10 @@ local function startElementSelection()
         if input.UserInputType == Enum.UserInputType.Keyboard or input.UserInputType == Enum.UserInputType.MouseButton1 then
             local mouse = LocalPlayer:GetMouse()
             local target = mouse.Target
-            -- Если нажали на GuiObject, используем его
             if target and target:IsA("GuiObject") then
                 detectionTarget = target
                 print("[SWILL] Выбран элемент:", detectionTarget:GetFullName())
             else
-                -- Если кликнули не по GUI, ищем под курсором GuiObject
                 local guiRoot = LocalPlayer:FindFirstChild("PlayerGui")
                 if guiRoot then
                     for _, obj in pairs(guiRoot:GetDescendants()) do
@@ -144,25 +129,201 @@ local function startElementSelection()
     end)
 end
 
--- ========== ОСТАЛЬНЫЕ ФУНКЦИИ (V10) ==========
--- (функции getGroundPosition, fixPositionIfFalling, getCoins, getNearestCoin, getNearbyPlayers, setNoclip, walkTo, stopMoving, evadeFromPlayer остаются без изменений, я их сокращу для экономии места)
-local function getGroundPosition(p) ... end
-local function fixPositionIfFalling() ... end
-local function getCoins() ... end
-local function getNearestCoin() ... end
-local function getNearbyPlayers(r) ... end
-local function setNoclip(state) ... end
-local function walkTo(pos) ... end
-local function stopMoving() ... end
-local function evadeFromPlayer(pr) ... end
+local function getGroundPosition(position, ignoreObjects)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    local ignoreList = {LocalPlayer.Character}
+    if ignoreObjects then
+        for _, obj in pairs(ignoreObjects) do
+            table.insert(ignoreList, obj)
+        end
+    end
+    rayParams.FilterDescendantsInstances = ignoreList
+    
+    local rayOrigin = position + Vector3.new(0, 5, 0)
+    local rayDirection = Vector3.new(0, -25, 0)
+    local result = Workspace:Raycast(rayOrigin, rayDirection, rayParams)
+    
+    if result then
+        return result.Position + Vector3.new(0, 3, 0)
+    end
+    return nil
+end
 
--- ========== ОСНОВНОЙ ЦИКЛ ==========
+local function isFalling()
+    if not LocalPlayer.Character then return false end
+    local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    if not humanoid then return false end
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    local velocity = rootPart.AssemblyLinearVelocity
+    if velocity.Y < -20 and humanoid.FloorMaterial == Enum.Material.Air then
+        return true
+    end
+    return false
+end
+
+local function fixPositionIfFalling()
+    if not isFalling() then return end
+    
+    if not LocalPlayer.Character then return end
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    local groundPos = getGroundPosition(rootPart.Position)
+    if groundPos then
+        if math.abs(rootPart.Position.Y - groundPos.Y) > 10 then
+            rootPart.CFrame = CFrame.new(groundPos)
+            if LocalPlayer.Character.Humanoid then
+                LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Landed)
+            end
+        end
+    else
+        rootPart.CFrame = CFrame.new(0, 10, 0)
+    end
+end
+
+local function getCoins()
+    local coins = {}
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") and v.Parent and v:FindFirstChild("TouchInterest") then
+            local nameLower = (v.Name or ""):lower()
+            if nameLower == "coin" or nameLower == "money" or string.find(nameLower, "coin") or
+               (v.BrickColor == BrickColor.new("Bright yellow") and v.Size.X < 5) then
+                table.insert(coins, v)
+            end
+        end
+    end
+    return coins
+end
+
+local function getNearestCoin()
+    local coins = getCoins()
+    if #coins == 0 then return nil, nil end
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return nil, nil end
+    
+    local rootPos = LocalPlayer.Character.HumanoidRootPart.Position
+    local nearest, nearestDist = nil, 100
+    local nearestHeightDiff = 0
+    
+    for _, coin in pairs(coins) do
+        local dist = (coin.Position - rootPos).Magnitude
+        local heightDiff = math.abs(coin.Position.Y - rootPos.Y)
+        
+        if dist < nearestDist and heightDiff < 15 then
+            nearestDist = dist
+            nearest = coin
+            nearestHeightDiff = heightDiff
+        end
+    end
+    return nearest, nearestDist, nearestHeightDiff
+end
+
+local function getNearbyPlayers(radius)
+    radius = radius or 50
+    local nearby = {}
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return nearby end
+    local rootPos = LocalPlayer.Character.HumanoidRootPart.Position
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local dist = (player.Character.HumanoidRootPart.Position - rootPos).Magnitude
+            if dist < radius then
+                table.insert(nearby, {player = player, rootPart = player.Character.HumanoidRootPart, distance = dist})
+            end
+        end
+    end
+    table.sort(nearby, function(a,b) return a.distance < b.distance end)
+    return nearby
+end
+
+local function setNoclip(state)
+    if not LocalPlayer.Character then return end
+    if state then
+        for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+        if currentNoclip then currentNoclip:Disconnect() end
+        currentNoclip = RunService.Stepped:Connect(function()
+            if LocalPlayer.Character then
+                for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end)
+    else
+        if currentNoclip then
+            currentNoclip:Disconnect()
+            currentNoclip = nil
+        end
+        if LocalPlayer.Character then
+            for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = true
+                end
+            end
+        end
+    end
+end
+
+local function walkTo(position)
+    if not LocalPlayer.Character then return false end
+    local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    if not humanoid then return false end
+    
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if rootPart and math.abs(position.Y - rootPart.Position.Y) > 5 then
+        position = Vector3.new(position.X, rootPart.Position.Y, position.Z)
+    end
+    
+    humanoid.WalkSpeed = 22
+    humanoid:MoveTo(position)
+    humanoid.AutoRotate = true
+    return true
+end
+
+local function stopMoving()
+    if not LocalPlayer.Character then return end
+    local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    if humanoid then
+        humanoid:MoveTo(Vector3.new(9e9,9e9,9e9))
+        task.wait()
+        humanoid:MoveTo(LocalPlayer.Character.HumanoidRootPart.Position)
+        humanoid.WalkSpeed = 16
+    end
+end
+
+local function evadeFromPlayer(playerRoot)
+    if not LocalPlayer.Character then return end
+    local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart then return end
+    
+    local direction = (rootPart.Position - playerRoot.Position).Unit
+    local evadePos = rootPart.Position + direction * 45
+    evadePos = Vector3.new(evadePos.X, rootPart.Position.Y, evadePos.Z)
+    
+    setNoclip(true)
+    local oldSpeed = humanoid.WalkSpeed
+    humanoid.WalkSpeed = 50
+    humanoid:MoveTo(evadePos)
+    task.wait(1.5)
+    humanoid.WalkSpeed = oldSpeed
+    setNoclip(false)
+end
+
 local function startFarmer()
     if currentConnection then return end
     isRunning = true
-    print("[SWILL] Фармер активирован V11 (ручной выбор элемента детекции)")
+    print("[SWILL] Фармер активирован V11")
+    
     currentConnection = RunService.Heartbeat:Connect(function()
         if not isRunning then return end
+        
         local active = isGameActuallyActive()
         if active ~= isGameActive then
             isGameActive = active
@@ -174,18 +335,23 @@ local function startFarmer()
                 print("[SWILL] Игра активна - бот работает")
             end
         end
+        
         if not active then
             if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
                 LocalPlayer.Character.Humanoid.WalkSpeed = 16
             end
             return
         end
+        
         if not LocalPlayer.Character then return end
         local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
         local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if not humanoid or not rootPart then return end
+        
         fixPositionIfFalling()
+        
         local nearbyPlayers = getNearbyPlayers(40)
+        
         if #nearbyPlayers > 0 and not isEvading then
             isEvading = true
             stopMoving()
@@ -193,12 +359,16 @@ local function startFarmer()
             isEvading = false
             return
         end
+        
         if #nearbyPlayers == 0 and not isEvading then
             setNoclip(false)
             local targetCoin, distToCoin, heightDiff = getNearestCoin()
+            
             if targetCoin and distToCoin > 3 and heightDiff and heightDiff < 15 then
                 walkTo(targetCoin.Position)
-                if rootPart then rootPart.CFrame = CFrame.new(rootPart.Position, targetCoin.Position) end
+                if rootPart then
+                    rootPart.CFrame = CFrame.new(rootPart.Position, targetCoin.Position)
+                end
             elseif targetCoin and distToCoin <= 3 then
                 stopMoving()
                 humanoid.WalkSpeed = 16
@@ -206,9 +376,12 @@ local function startFarmer()
                 if #getCoins() > 0 then
                     local groundPos = getGroundPosition(rootPart.Position)
                     if groundPos then
-                        walkTo(groundPos + Vector3.new(math.random(-20,20), 0, math.random(-20,20)))
+                        local randomPos = groundPos + Vector3.new(math.random(-20,20), 0, math.random(-20,20))
+                        walkTo(randomPos)
                     else
-                        walkTo(rootPart.Position + Vector3.new(math.random(-20,20), 0, math.random(-20,20)))
+                        local randomPos = rootPart.Position + Vector3.new(math.random(-20,20), 0, math.random(-20,20))
+                        randomPos = Vector3.new(randomPos.X, rootPart.Position.Y, randomPos.Z)
+                        walkTo(randomPos)
                     end
                 else
                     stopMoving()
@@ -219,7 +392,10 @@ local function startFarmer()
 end
 
 local function stopFarmer()
-    if currentConnection then currentConnection:Disconnect() end
+    if currentConnection then
+        currentConnection:Disconnect()
+        currentConnection = nil
+    end
     stopMoving()
     setNoclip(false)
     isRunning = false
@@ -228,7 +404,6 @@ local function stopFarmer()
     print("[SWILL] Фармер остановлен")
 end
 
--- ========== GUI ==========
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "SWILL_MM2_GUI"
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
@@ -300,13 +475,19 @@ local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0,8)
 toggleCorner.Parent = toggleButton
 
--- Обновление статуса игры
 spawn(function()
     while task.wait(0.5) do
         if screenGui and screenGui.Parent then
             local active = isGameActuallyActive()
-            gameStatusText.Text = active and "ИГРА: АКТИВНА ▶" or "ИГРА: ЛОББИ/СПЕКТАТОР ⏸"
-            gameStatusText.TextColor3 = active and Color3.fromRGB(100,255,100) or Color3.fromRGB(255,100,100)
+            if active then
+                gameStatusText.Text = "ИГРА: АКТИВНА ▶"
+                gameStatusText.TextColor3 = Color3.fromRGB(100,255,100)
+            else
+                gameStatusText.Text = "ИГРА: ЛОББИ/СПЕКТАТОР ⏸"
+                gameStatusText.TextColor3 = Color3.fromRGB(255,100,100)
+            end
+        else
+            break
         end
     end
 end)
@@ -339,5 +520,3 @@ LocalPlayer.CharacterAdded:Connect(function(char)
 end)
 
 print("[SWILL] V11 ЗАГРУЖЕН")
-print("[SWILL] Если автоопределение не работает, нажмите 'ВЫБРАТЬ ЭЛЕМЕНТ' и кликните на таймер.")
-print("[SWILL] После выбора бот будет ориентироваться на видимость этого элемента.")
