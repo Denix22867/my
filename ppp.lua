@@ -10,7 +10,8 @@ local isGameActive = false
 local currentNoclip = nil
 local currentConnection = nil
 local detectionTarget = nil
-local debugMode = true
+local lastCollectTime = 0
+local fallingStartTime = 0
 
 local function isGameActuallyActive()
     if detectionTarget and detectionTarget.Parent and detectionTarget:IsDescendantOf(game) then
@@ -23,11 +24,7 @@ local function isGameActuallyActive()
                 parent = parent.Parent
             end
         end
-        if visible then
-            return true
-        else
-            return false
-        end
+        if visible then return true else return false end
     end
     
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
@@ -77,15 +74,7 @@ local function isGameActuallyActive()
     end
     
     local indicators = (hasTimer and 1 or 0) + (hasReset and 1 or 0) + (hasRole and 1 or 0)
-    local active = indicators >= 2 and not isSpectating and isAlive and otherPlayers > 0
-    
-    if debugMode then
-        print("[DEBUG] Timer:", hasTimer, "Reset:", hasReset, "Role:", hasRole)
-        print("[DEBUG] Spectate:", isSpectating, "Alive:", isAlive, "Players:", otherPlayers)
-        print("[DEBUG] Active:", active)
-    end
-    
-    return active
+    return indicators >= 2 and not isSpectating and isAlive and otherPlayers > 0
 end
 
 local function startElementSelection()
@@ -129,19 +118,13 @@ local function startElementSelection()
     end)
 end
 
-local function getGroundPosition(position, ignoreObjects)
+local function getGroundPosition(position)
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-    local ignoreList = {LocalPlayer.Character}
-    if ignoreObjects then
-        for _, obj in pairs(ignoreObjects) do
-            table.insert(ignoreList, obj)
-        end
-    end
-    rayParams.FilterDescendantsInstances = ignoreList
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
     
     local rayOrigin = position + Vector3.new(0, 5, 0)
-    local rayDirection = Vector3.new(0, -25, 0)
+    local rayDirection = Vector3.new(0, -30, 0)
     local result = Workspace:Raycast(rayOrigin, rayDirection, rayParams)
     
     if result then
@@ -158,30 +141,36 @@ local function isFalling()
     if not rootPart then return false end
     
     local velocity = rootPart.AssemblyLinearVelocity
-    if velocity.Y < -20 and humanoid.FloorMaterial == Enum.Material.Air then
-        return true
+    if velocity.Y < -15 and humanoid.FloorMaterial == Enum.Material.Air then
+        if fallingStartTime == 0 then fallingStartTime = tick() end
+        return (tick() - fallingStartTime) > 0.5
+    else
+        fallingStartTime = 0
+        return false
     end
-    return false
 end
 
 local function fixPositionIfFalling()
     if not isFalling() then return end
-    
     if not LocalPlayer.Character then return end
     local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
     
     local groundPos = getGroundPosition(rootPart.Position)
     if groundPos then
-        if math.abs(rootPart.Position.Y - groundPos.Y) > 10 then
+        local yDiff = math.abs(rootPart.Position.Y - groundPos.Y)
+        if yDiff > 8 then
             rootPart.CFrame = CFrame.new(groundPos)
             if LocalPlayer.Character.Humanoid then
                 LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Landed)
             end
+            task.wait(0.2)
         end
     else
-        rootPart.CFrame = CFrame.new(0, 10, 0)
+        rootPart.CFrame = CFrame.new(0, 15, 0)
+        task.wait(0.2)
     end
+    fallingStartTime = 0
 end
 
 local function getCoins()
@@ -210,8 +199,7 @@ local function getNearestCoin()
     for _, coin in pairs(coins) do
         local dist = (coin.Position - rootPos).Magnitude
         local heightDiff = math.abs(coin.Position.Y - rootPos.Y)
-        
-        if dist < nearestDist and heightDiff < 15 then
+        if dist < nearestDist and heightDiff < 12 then
             nearestDist = dist
             nearest = coin
             nearestHeightDiff = heightDiff
@@ -276,7 +264,7 @@ local function walkTo(position)
     if not humanoid then return false end
     
     local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if rootPart and math.abs(position.Y - rootPart.Position.Y) > 5 then
+    if rootPart and math.abs(position.Y - rootPart.Position.Y) > 4 then
         position = Vector3.new(position.X, rootPart.Position.Y, position.Z)
     end
     
@@ -319,7 +307,7 @@ end
 local function startFarmer()
     if currentConnection then return end
     isRunning = true
-    print("[SWILL] Фармер активирован V11")
+    print("[SWILL] Фармер активирован V12")
     
     currentConnection = RunService.Heartbeat:Connect(function()
         if not isRunning then return end
@@ -364,14 +352,17 @@ local function startFarmer()
             setNoclip(false)
             local targetCoin, distToCoin, heightDiff = getNearestCoin()
             
-            if targetCoin and distToCoin > 3 and heightDiff and heightDiff < 15 then
-                walkTo(targetCoin.Position)
-                if rootPart then
-                    rootPart.CFrame = CFrame.new(rootPart.Position, targetCoin.Position)
+            if targetCoin and distToCoin > 3 and heightDiff and heightDiff < 12 then
+                if tick() - lastCollectTime > 0.5 then
+                    walkTo(targetCoin.Position)
+                    if rootPart then
+                        rootPart.CFrame = CFrame.new(rootPart.Position, targetCoin.Position)
+                    end
                 end
             elseif targetCoin and distToCoin <= 3 then
                 stopMoving()
                 humanoid.WalkSpeed = 16
+                lastCollectTime = tick()
             else
                 if #getCoins() > 0 then
                     local groundPos = getGroundPosition(rootPart.Position)
@@ -401,6 +392,7 @@ local function stopFarmer()
     isRunning = false
     isEvading = false
     isGameActive = false
+    fallingStartTime = 0
     print("[SWILL] Фармер остановлен")
 end
 
@@ -422,7 +414,7 @@ corner.Parent = frame
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1,0,0,30)
-title.Text = "SWILL FARMER V11"
+title.Text = "SWILL FARMER V12"
 title.TextColor3 = Color3.fromRGB(255,255,255)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
@@ -519,4 +511,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
-print("[SWILL] V11 ЗАГРУЖЕН")
+print("[SWILL] V12 ЗАГРУЖЕН - ИСПРАВЛЕН ПРОВАЛ ПОСЛЕ СБОРА МОНЕТ")
+print("[SWILL] - Задержка между движениями")
+print("[SWILL] - Улучшенная коррекция падения")
+print("[SWILL] - Игнорирование высоких монет")
