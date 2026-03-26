@@ -10,8 +10,8 @@ local isGameActive = false
 local currentNoclip = nil
 local currentConnection = nil
 local detectionTarget = nil
-local lastCollectTime = 0
 local fallingStartTime = 0
+local currentTargetCoin = nil
 
 local function isGameActuallyActive()
     if detectionTarget and detectionTarget.Parent and detectionTarget:IsDescendantOf(game) then
@@ -199,7 +199,7 @@ local function getNearestCoin()
     for _, coin in pairs(coins) do
         local dist = (coin.Position - rootPos).Magnitude
         local heightDiff = math.abs(coin.Position.Y - rootPos.Y)
-        if dist < nearestDist and heightDiff < 12 then
+        if dist < nearestDist and heightDiff < 15 then
             nearestDist = dist
             nearest = coin
             nearestHeightDiff = heightDiff
@@ -268,7 +268,7 @@ local function walkTo(position)
         position = Vector3.new(position.X, rootPart.Position.Y, position.Z)
     end
     
-    humanoid.WalkSpeed = 22
+    humanoid.WalkSpeed = 24
     humanoid:MoveTo(position)
     humanoid.AutoRotate = true
     return true
@@ -307,7 +307,7 @@ end
 local function startFarmer()
     if currentConnection then return end
     isRunning = true
-    print("[SWILL] Фармер активирован V12")
+    print("[SWILL] Фармер активирован V13 - исправлена остановка движения")
     
     currentConnection = RunService.Heartbeat:Connect(function()
         if not isRunning then return end
@@ -352,17 +352,18 @@ local function startFarmer()
             setNoclip(false)
             local targetCoin, distToCoin, heightDiff = getNearestCoin()
             
-            if targetCoin and distToCoin > 3 and heightDiff and heightDiff < 12 then
-                if tick() - lastCollectTime > 0.5 then
-                    walkTo(targetCoin.Position)
-                    if rootPart then
-                        rootPart.CFrame = CFrame.new(rootPart.Position, targetCoin.Position)
-                    end
+            if targetCoin and distToCoin > 2.5 and heightDiff and heightDiff < 15 then
+                walkTo(targetCoin.Position)
+                if rootPart then
+                    rootPart.CFrame = CFrame.new(rootPart.Position, targetCoin.Position)
                 end
-            elseif targetCoin and distToCoin <= 3 then
-                stopMoving()
-                humanoid.WalkSpeed = 16
-                lastCollectTime = tick()
+            elseif targetCoin and distToCoin <= 2.5 then
+                if humanoid.WalkSpeed > 16 then
+                    humanoid.WalkSpeed = 16
+                end
+                if humanoid.MoveDirection.Magnitude > 0 then
+                    stopMoving()
+                end
             else
                 if #getCoins() > 0 then
                     local groundPos = getGroundPosition(rootPart.Position)
@@ -375,7 +376,9 @@ local function startFarmer()
                         walkTo(randomPos)
                     end
                 else
-                    stopMoving()
+                    if humanoid.WalkSpeed > 16 then
+                        humanoid.WalkSpeed = 16
+                    end
                 end
             end
         end
@@ -414,7 +417,7 @@ corner.Parent = frame
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1,0,0,30)
-title.Text = "SWILL FARMER V12"
+title.Text = "SWILL FARMER V13"
 title.TextColor3 = Color3.fromRGB(255,255,255)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
@@ -511,7 +514,5 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
-print("[SWILL] V12 ЗАГРУЖЕН - ИСПРАВЛЕН ПРОВАЛ ПОСЛЕ СБОРА МОНЕТ")
-print("[SWILL] - Задержка между движениями")
-print("[SWILL] - Улучшенная коррекция падения")
-print("[SWILL] - Игнорирование высоких монет")
+print("[SWILL] V13 ЗАГРУЖЕН - БОЛЬШЕ НЕ ЗАМИРАЕТ")
+print("[SWILL] Постоянное движение к монетам, убраны задержки")
